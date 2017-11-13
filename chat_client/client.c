@@ -18,7 +18,9 @@
 #include <arpa/inet.h>  //ip_address
 #include <netdb.h>
 #include <unitypes.h>
+#include <errno.h>
 //Macros
+#define SOCKET int
 #define error(x) perror(x)  //error printout
 #elif defined(OS_Windows)
 #include <winsock2.h>
@@ -29,38 +31,40 @@
 #define error(x) printf("%s Error: %d", x, WSAGetLastError())   //error printout
 #endif
 
-int main(int argc , char *argv[])
-{
+#define STDIN 0
+
+//Variables
+char message[1024], buf[1024];;
+SOCKET sock;
+int n;
+fd_set master, read_fds;
+
+int main(int argc17, char *argv[]) {
 #ifdef OS_Windows
     //initializations for winsock
     WSADATA wsa;
-    SOCKET sock;
     printf("Initializing WINSock...");
     if(WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         error("wsainit");
         exit(EXIT_FAILURE);
     }
     printf("Initialized!\n");
-#elif defined(OS_Linux)
-    //initialisations for unix
-    int sock;
 #endif
     struct sockaddr_in server;
     int pos = 0;
-    char ip_address[16], port_s[8], message[1000] , server_reply[1000];
+    char ip_address[16], port_s[8], *server_reply;
     char *ptr;
     long port;
 
     //Create socket
-    sock = socket(AF_INET , SOCK_STREAM , 0);
-    if (sock == -1)
-    {
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock == -1) {
         error("createsocket");
     }
     puts("Socket created!");
 
     //get user input for host
-    printf("Please enter the IP-address and port of the server you want to connect to:\n");
+    printf("Please enter the IP-address of the host you want to connect to:\n");
     scanf("%s", ip_address);
     printf("Please enter the port on which to connect to the server:\n");
     scanf("%s", port_s);
@@ -69,62 +73,62 @@ int main(int argc , char *argv[])
 
     server.sin_addr.s_addr = inet_addr(ip_address);
     server.sin_family = AF_INET;
-    server.sin_port = htons( (uint16_t) port );
+    server.sin_port = htons((uint16_t) port);
     memset(server.sin_zero, '\0', sizeof server.sin_zero);
 
     //Connect to remote server
-    if (connect(sock , (struct sockaddr *)&server , sizeof(server)) < 0)
-    {
+    if (connect(sock, (struct sockaddr *) &server, sizeof(server)) < 0) {
         error("connect");
         return 1;
     }
-
     puts("Connected!\n");
 
-    //Get welcome message
-    if( recv(sock , server_reply , 1024 , 0) < 0)
-    {
-        error("recv");
-    }
-    puts(server_reply);
+    fd_set connset, readset;
+    int size, nread, msglen, bytesToRead, bytesToSend, cnt, nsent = 0;
+    FD_ZERO(&connset);
 
-    //keep communicating with server
-    while(1)
-    {
-        memset(server_reply, '\0', sizeof server_reply);
-        printf("Enter message :\n");
-        scanf("%s" , message);
+    while (1) {
+        FD_ZERO(&master);
+        FD_ZERO(&read_fds);
 
-        //Send some data
-        if( send(sock , message , strlen(message) , 0) != strlen(message))
-        {
-            error("send");
-            break;
+        FD_SET(0, &master);
+        FD_SET(sock, &master);
+        while (1) {
+            read_fds = master;
+            if (select(sock + 1, &read_fds, NULL, NULL, NULL) == -1) {
+                perror("select:");
+                exit(1);
+            }
+            // Listen for server messages
+            if (FD_ISSET(sock, &read_fds)) {
+                n = read(sock, buf, sizeof(buf));
+                buf[n] = 0;
+                if (n < 0) {
+                    error("read");
+                    exit(1);
+                }
+                printf("Server reply: %s", buf);
+            }
+            // Listen for userinput
+            if (FD_ISSET(STDIN, &read_fds)) {
+                n = read(STDIN, message, sizeof(message));
+                message[n] = 0;
+                n = write(sock, message, strlen(message));
+                if (n < 0) {
+                    perror("writeThread:");
+                    exit(1);
+                }
+                if (strcmp(message, "--exit")) {
+                    printf("Terminating session...");
+                    break;
+                }
+                memset(message, '\0', sizeof(message));
+            }
         }
-
-        //Receive a reply from the server
-        if( recv(sock , server_reply , 1024 , 0) < 0)
-        {
-            error("recv");
-            break;
-        }
-
-        puts("Server reply :");
-        puts(server_reply);
-
-        if(strcmp(message, "--exit") == 0) {
-            printf("Terminating session...");
-            break;
-        }
-    }
-
-    if(close(sock) < 0) {
-        error("closingfd");
-    }
+        close(sock);
 #ifdef OS_Windows
-    WSACleanup();
+        WSACleanup();
 #endif
-    printf("Session terminated!");
-    return 0;
+    }
 }
 

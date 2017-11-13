@@ -202,7 +202,11 @@ int main(int argc , char *argv[]) {
                     } else {
                         //set the string terminating NULL byte on the end of the data read
                         buffer[valread] = '\0';
-                        send(sd, buffer, strlen(buffer), 0);
+                        for(int j = 0; j < max_clients; j++) {
+                            sd = client_sockets[j];
+                            if(sd != 0)
+                                send(sd, buffer, strlen(buffer), 0);
+                        }
                     }
                 }
             }
